@@ -20,6 +20,8 @@ func main() {
 	topic := flag.String("topic", defaultTopic, "Kafka topic to send CSV lines")
 	flag.Parse()
 
+	log.Printf("csv2kafka starting | watchdir=%s topic=%s brokers=%v", *watchDir, *topic, KafkaBrokers)
+
 	// 初始化 Kafka 生产者
 	sender, err := NewKafkaSender(KafkaBrokers, *topic)
 	if err != nil {
@@ -37,6 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatal("watch dir error:", err)
 	}
+	log.Printf("watch established on %s", *watchDir)
 
 	// 阻塞主协程
 	select {}
