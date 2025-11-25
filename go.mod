@@ -5,6 +5,7 @@ go 1.21
 require (
 	github.com/Shopify/sarama v1.38.1
 	github.com/fsnotify/fsnotify v1.7.0
+	github.com/pebbe/zmq4 v1.2.7
 )
 
 require (

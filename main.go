@@ -9,23 +9,32 @@ import (
 )
 
 const (
-	defaultWatchDir = "/host/output"
-	defaultTopic    = "yaf_csv"
+	defaultWatchDir   = "/host/output"
+	defaultTopic      = "yaf_csv"
+	defaultTransport  = "kafka"
+	defaultZMQAddress = "tcp://127.0.0.1:5555"
 )
 
 var KafkaBrokers = []string{"localhost:9092"}
 
+// LineSender 描述统一的发送接口，便于扩展不同后端。
+type LineSender interface {
+	SendLine(line string)
+}
+
 func main() {
 	watchDir := flag.String("watchdir", defaultWatchDir, "directory to watch for CSV files")
 	topic := flag.String("topic", defaultTopic, "Kafka topic to send CSV lines")
+	transport := flag.String("transport", defaultTransport, "output transport: kafka or zmq")
+	zmqEndpoint := flag.String("zmq-endpoint", defaultZMQAddress, "ZMQ endpoint when transport=zmq")
 	flag.Parse()
 
-	log.Printf("csv2kafka starting | watchdir=%s topic=%s brokers=%v", *watchDir, *topic, KafkaBrokers)
+	log.Printf("csv2kafka starting | watchdir=%s transport=%s", *watchDir, *transport)
 
-	// 初始化 Kafka 生产者
-	sender, err := NewKafkaSender(KafkaBrokers, *topic)
+	// 初始化发送器
+	sender, err := buildSender(*transport, *topic, *zmqEndpoint)
 	if err != nil {
-		log.Fatalf("Kafka init failed: %v", err)
+		log.Fatalf("sender init failed: %v", err)
 	}
 
 	// 启动目录监控
@@ -49,8 +58,8 @@ func isCSV(path string) bool {
 	return len(path) > 4 && path[len(path)-4:] == ".csv"
 }
 
-// sendCSV 逐行读取 CSV 并发送到 Kafka。
-func sendCSV(path string, sender *KafkaSender) {
+// sendCSV 逐行读取 CSV 并发送到目标后端。
+func sendCSV(path string, sender LineSender) {
 	f, err := os.Open(path)
 	if err != nil {
 		log.Println("open csv error:", err)
@@ -72,5 +81,16 @@ func sendCSV(path string, sender *KafkaSender) {
 	if err := scanner.Err(); err != nil {
 		log.Println("read csv error:", err)
 	}
-	fmt.Printf("Sent %d lines from %s to Kafka\n", lineNo-1, path)
+	fmt.Printf("Sent %d lines from %s\n", lineNo-1, path)
+}
+
+func buildSender(transport, topic, zmqEndpoint string) (LineSender, error) {
+	switch transport {
+	case "kafka":
+		return NewKafkaSender(KafkaBrokers, topic)
+	case "zmq":
+		return NewZMQSender(zmqEndpoint)
+	default:
+		return nil, fmt.Errorf("unsupported transport %s", transport)
+	}
 }
