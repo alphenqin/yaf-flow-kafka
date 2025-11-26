@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	defaultWatchDir   = "/host/output"
 	defaultTopic      = "yaf_csv"
 	defaultTransport  = "kafka"
 	defaultZMQAddress = "tcp://127.0.0.1:5555"
@@ -23,13 +22,13 @@ type LineSender interface {
 }
 
 func main() {
-	watchDir := flag.String("watchdir", defaultWatchDir, "directory to watch for CSV files")
 	topic := flag.String("topic", defaultTopic, "Kafka topic to send CSV lines")
 	transport := flag.String("transport", defaultTransport, "output transport: kafka or zmq")
 	zmqEndpoint := flag.String("zmq-endpoint", defaultZMQAddress, "ZMQ endpoint when transport=zmq")
+	skipHeader := flag.Bool("skip-header", true, "skip first line as CSV header")
 	flag.Parse()
 
-	log.Printf("csv2kafka starting | watchdir=%s transport=%s", *watchDir, *transport)
+	log.Printf("csv2kafka starting | transport=%s", *transport)
 
 	// 初始化发送器
 	sender, err := buildSender(*transport, *topic, *zmqEndpoint)
@@ -37,58 +36,49 @@ func main() {
 		log.Fatalf("sender init failed: %v", err)
 	}
 
-	// 启动目录监控
-	err = WatchDir(*watchDir, func(path string) {
-		if !isCSV(path) {
-			return
-		}
-		log.Println("New CSV ready:", path)
-		sendCSV(path, sender)
-	})
-	if err != nil {
-		log.Fatal("watch dir error:", err)
-	}
-	log.Printf("watch established on %s", *watchDir)
-
-	// 阻塞主协程
-	select {}
+	// 从标准输入读取并发送
+	processStdin(sender, *skipHeader)
 }
 
-func isCSV(path string) bool {
-	return len(path) > 4 && path[len(path)-4:] == ".csv"
-}
-
-// sendCSV 逐行读取 CSV 并发送到目标后端。
-func sendCSV(path string, sender LineSender) {
-	f, err := os.Open(path)
-	if err != nil {
-		log.Println("open csv error:", err)
-		return
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
+// processStdin 从标准输入逐行读取 CSV 并发送到目标后端。
+func processStdin(sender LineSender, skipHeader bool) {
+	scanner := bufio.NewScanner(os.Stdin)
 	lineNo := 0
+	sentCount := 0
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		if lineNo == 0 {
-			lineNo++
-			continue // 跳过 header
-		}
-		sender.SendLine(line)
 		lineNo++
+
+		// 跳过 header
+		if skipHeader && lineNo == 1 {
+			log.Printf("Skipping header: %s", line)
+			continue
+		}
+
+		// 跳过空行
+		if len(line) == 0 {
+			continue
+		}
+
+		sender.SendLine(line)
+		sentCount++
 	}
+
 	if err := scanner.Err(); err != nil {
-		log.Println("read csv error:", err)
+		log.Fatalf("read from stdin error: %v", err)
 	}
-	fmt.Printf("Sent %d lines from %s\n", lineNo-1, path)
+
+	log.Printf("Processed %d lines, sent %d lines to %s", lineNo, sentCount, "backend")
 }
 
 func buildSender(transport, topic, zmqEndpoint string) (LineSender, error) {
 	switch transport {
 	case "kafka":
+		log.Printf("Using Kafka transport | brokers=%v topic=%s", KafkaBrokers, topic)
 		return NewKafkaSender(KafkaBrokers, topic)
 	case "zmq":
+		log.Printf("Using ZMQ transport | endpoint=%s", zmqEndpoint)
 		return NewZMQSender(zmqEndpoint)
 	default:
 		return nil, fmt.Errorf("unsupported transport %s", transport)
