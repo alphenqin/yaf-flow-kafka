@@ -1,0 +1,36 @@
+-- 调试专用 yaf.init：抓所有接口，立刻导出 flow
+
+-- 1. 输入：用 libpcap 抓 "any" 接口
+input = {
+    type = "pcap",
+    inf  = "any",          -- ★ 关键：any，抓所有接口
+    export_interface = true
+}
+
+-- 2. 输出：发 IPFIX 到本地 18000 端口（super_mediator 在那里听）
+output = {
+    host     = "127.0.0.1",
+    port     = "18000",
+    protocol = "tcp"
+}
+
+-- 3. 导出选项
+export = {
+    silk       = true,
+    uniflow    = true,
+    mac        = true,
+    flow_stats = true
+}
+
+-- 4. 为了调试：立刻导出 flow
+idle_timeout   = 0      -- ★ 见到包就导出
+active_timeout = 300
+
+-- 5. 暂时不要过滤，先把流弄出来再说
+-- filter = "tcp or udp"
+
+-- 6. 先关掉 applabel/DPI，简化变量，后面再慢慢开
+applabel       = false
+dpi            = false
+maxpayload     = 0
+export_payload = false
